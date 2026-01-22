@@ -13,21 +13,27 @@ export default function MembersPage() {
   const [search, setSearch] = useState('');
   const [filterGroup, setFilterGroup] = useState('Tất cả');
   const [loading, setLoading] = useState(false);
-  const [memberLog, setMemberLog] = useState(null); // State để lưu thành viên đang xem nhật ký
+  const [memberLog, setMemberLog] = useState(null);
 
+  // KHẮC PHỤC LỖI: CHUYỂN HƯỚNG IM LẶNG
   useEffect(() => {
     const role = localStorage.getItem('userRole');
-    if (role !== 'Super Admin') {
-      alert("TRUY CẬP BỊ TỪ CHỐI!");
-      router.push('/scan');
+    const isLoggedIn = localStorage.getItem('isLoggedIn');
+    if (isLoggedIn !== 'true' || role !== 'Super Admin') {
+      router.push('/login');
     } else {
       fetchData();
     }
-  }, []);
+  }, [router]);
 
   const fetchData = async () => {
     const snap = await getDocs(collection(db, "members"));
     setMembers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+  };
+
+  const handleLogout = () => {
+    localStorage.clear();
+    router.replace('/login');
   };
 
   const getFilteredData = () => {
@@ -37,65 +43,83 @@ export default function MembersPage() {
     );
   };
 
-  // --- CÁC HÀM XUẤT DỮ LIỆU (GIỮ NGUYÊN) ---
-  const exportQRToExcel = async () => { /* ... hàm xuất Excel QR giữ nguyên ... */ };
-  const exportAttendanceExcel = async () => { /* ... hàm xuất điểm danh giữ nguyên ... */ };
+  const exportQRToExcel = async () => {
+    if (loading) return;
+    try {
+      setLoading(true);
+      const workbook = new ExcelJS.Workbook();
+      const ws = workbook.addWorksheet('THE_QR_QNU');
+      ws.columns = [
+        { header: 'STT', key: 'stt', width: 8 },
+        { header: 'HỌ TÊN', key: 'name', width: 30 },
+        { header: 'MSSV', key: 'mssv', width: 15 },
+        { header: 'TỔ', key: 'group', width: 10 },
+        { header: 'QR', key: 'qr', width: 22 }
+      ];
+      const data = getFilteredData();
+      for (let i = 0; i < data.length; i++) {
+        const m = data[i];
+        const row = ws.addRow({ stt: i + 1, name: m.name.toUpperCase(), mssv: m.mssv, group: `TỔ ${m.group}` });
+        row.height = 95;
+        const qrUrl = await QRCode.toDataURL(m.id || 'err');
+        const imgId = workbook.addImage({ base64: qrUrl, extension: 'png' });
+        ws.addImage(imgId, { tl: { col: 4, row: row.number - 1 }, ext: { width: 110, height: 110 } });
+      }
+      const buffer = await workbook.xlsx.writeBuffer();
+      saveAs(new Blob([buffer]), `The_QR_QNU.xlsx`);
+    } catch (error) { console.error(error); } 
+    finally { setLoading(false); }
+  };
 
   return (
-    <div className="p-10 max-w-full bg-[#fcfcfc] min-h-screen relative">
+    <div className="p-10 max-w-full bg-[#fcfcfc] min-h-screen">
       <header className="flex justify-between items-end mb-12 border-b-4 border-slate-900 pb-8">
         <div>
-          <h1 className="text-4xl font-black uppercase italic tracking-tighter text-slate-900">Quản trị nhân sự</h1>
-          <p className="text-[10px] font-bold uppercase tracking-[0.4em] text-indigo-600 mt-2 italic">Dữ liệu đội viên QNU</p>
+          <h1 className="text-4xl font-black uppercase italic tracking-tighter text-slate-900">Danh sách đội</h1>
+          <p className="text-[10px] font-bold uppercase tracking-[0.4em] text-indigo-600 mt-2">QNU Volunteer System</p>
         </div>
-        <div className="flex gap-4">
-          <button onClick={exportAttendanceExcel} className="px-6 py-4 bg-slate-900 text-white font-black text-[9px] uppercase tracking-widest border-2 border-slate-900 shadow-[4px_4px_0px_0px_rgba(79,70,229,1)] hover:bg-indigo-950 transition-all">
-            📊 Báo cáo điểm danh
+        <div className="flex gap-3">
+          <button onClick={() => router.push('/admin')} className="px-5 py-3 bg-indigo-600 text-white font-black text-[9px] uppercase border-2 border-black">⚙️ Công cụ</button>
+          <button onClick={exportQRToExcel} disabled={loading} className="px-5 py-3 bg-emerald-500 text-white font-black text-[9px] uppercase border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+            {loading ? "ĐANG TẠO..." : "🖼️ Excel Thẻ (QR)"}
           </button>
-          <button onClick={exportQRToExcel} disabled={loading} className="px-6 py-4 bg-emerald-500 text-white font-black text-[9px] uppercase tracking-widest border-2 border-slate-900 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-emerald-600 transition-all disabled:opacity-50">
-            {loading ? "ĐANG TẠO QR..." : "📥 Tải Excel Thẻ (QR)"}
-          </button>
+          <button onClick={handleLogout} className="px-5 py-3 bg-rose-600 text-white font-black text-[9px] uppercase border-2 border-black">Đăng xuất</button>
         </div>
       </header>
 
-      {/* SEARCH & FILTER */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10">
         <div className="md:col-span-3">
-          <input className="w-full p-4 border-2 border-slate-200 font-bold outline-none focus:border-indigo-600 bg-white" placeholder="TÌM KIẾM ĐỘI VIÊN..." onChange={e=>setSearch(e.target.value)} />
+          <input className="w-full p-4 border-2 border-slate-200 font-bold outline-none focus:border-indigo-600" placeholder="TÌM KIẾM..." onChange={e=>setSearch(e.target.value)} />
         </div>
-        <select className="p-4 border-2 border-slate-900 font-black uppercase text-[10px] outline-none cursor-pointer bg-white" value={filterGroup} onChange={e=>setFilterGroup(e.target.value)}>
+        <select className="p-4 border-2 border-slate-900 font-black uppercase text-[10px] bg-white" value={filterGroup} onChange={e=>setFilterGroup(e.target.value)}>
           <option value="Tất cả">Tất cả Tổ</option>
-          {[...new Set(members.map(m => m.group))].sort().map(g => (
-            <option key={g} value={g}>Tổ {g}</option>
-          ))}
+          {[...new Set(members.map(m => m.group))].sort().map(g => <option key={g} value={g}>Tổ {g}</option>)}
         </select>
       </div>
 
-      {/* TABLE */}
-      <div className="bg-white border-4 border-slate-900 overflow-x-auto shadow-sm">
-        <table className="w-full border-collapse min-w-[1500px]">
-          <thead className="bg-[#0f172a] text-white">
+      <div className="bg-white border-4 border-slate-900 overflow-x-auto">
+        <table className="w-full border-collapse min-w-[1000px]">
+          <thead className="bg-slate-900 text-white">
             <tr>
-              <th className="p-5 text-[10px] font-black uppercase border-r border-white/5 w-16">STT</th>
-              <th className="p-5 text-[10px] font-black uppercase border-r border-white/10 w-72 text-left">Họ và Tên</th>
-              <th className="p-5 text-[10px] font-black uppercase border-r border-white/5 w-40 text-center">MSSV</th>
-              <th className="p-5 text-[10px] font-black uppercase border-r border-white/5 text-left">Ngành học</th>
-              <th className="p-5 text-[10px] font-black uppercase border-r border-white/5 w-24 text-center text-emerald-400">Số buổi</th>
-              <th className="p-5 text-[10px] font-black uppercase text-center">Hành động</th>
+              <th className="p-5 text-[10px] font-black uppercase border-r border-white/10">STT</th>
+              <th className="p-5 text-[10px] font-black uppercase border-r border-white/10 text-left">Họ tên</th>
+              <th className="p-5 text-[10px] font-black uppercase border-r border-white/10">MSSV</th>
+              <th className="p-5 text-[10px] font-black uppercase border-r border-white/10">Tổ</th>
+              <th className="p-5 text-[10px] font-black uppercase border-r border-white/10 text-emerald-400">Số buổi</th>
+              <th className="p-5 text-[10px] font-black uppercase">Thao tác</th>
             </tr>
           </thead>
-          <tbody className="text-sm font-bold">
+          <tbody className="text-sm font-bold uppercase">
             {getFilteredData().map((m, i) => (
-              <tr key={m.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                <td className="p-5 text-center text-slate-300 border-r border-slate-50">{i+1}</td>
-                <td className="p-5 uppercase border-r border-slate-50">{m.name}</td>
-                <td className="p-5 text-center font-black text-indigo-600 border-r border-slate-50">{m.mssv}</td>
-                <td className="p-5 uppercase text-[10px] border-r border-slate-50 text-slate-500">{m.major}</td>
-                <td className="p-5 text-center font-black text-2xl text-emerald-600 border-r border-slate-50">{m.activityCount || 0}</td>
+              <tr key={m.id} className="border-b border-slate-100 hover:bg-slate-50">
+                <td className="p-5 text-center text-slate-300">{i+1}</td>
+                <td className="p-5">{m.name}</td>
+                <td className="p-5 text-center text-indigo-600">{m.mssv}</td>
+                <td className="p-5 text-center">Tổ {m.group}</td>
+                <td className="p-5 text-center font-black text-2xl text-emerald-600">{m.activityCount || 0}</td>
                 <td className="p-5 flex justify-center gap-2">
-                  {/* SỬA LỖI: NÚT BẬT NHẬT KÝ */}
-                  <button onClick={() => setMemberLog(m)} className="px-4 py-2 border-2 border-slate-900 text-[9px] font-black uppercase hover:bg-slate-900 hover:text-white transition-all">Nhật ký</button>
-                  <button onClick={async () => { if(confirm("XÓA ĐỘI VIÊN?")){ await deleteDoc(doc(db,"members",m.id)); fetchData(); } }} className="px-4 py-2 border-2 border-rose-500 text-rose-500 text-[9px] font-black uppercase">Xóa</button>
+                  <button onClick={() => setMemberLog(m)} className="px-3 py-1 border-2 border-slate-900 text-[8px] font-black">Nhật ký</button>
+                  <button onClick={async () => { if(confirm("XÓA?")){ await deleteDoc(doc(db,"members",m.id)); fetchData(); } }} className="px-3 py-1 border-2 border-rose-500 text-rose-500 text-[8px] font-black">Xóa</button>
                 </td>
               </tr>
             ))}
@@ -103,42 +127,24 @@ export default function MembersPage() {
         </table>
       </div>
 
-      {/* --- PHẦN GIAO DIỆN NHẬT KÝ (MODAL) --- */}
       {memberLog && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
-          <div className="bg-white border-4 border-slate-900 w-full max-w-2xl shadow-[20px_20px_0px_0px_rgba(0,0,0,1)]">
-            <header className="bg-slate-900 p-6 flex justify-between items-center">
-              <h2 className="text-white font-black uppercase italic tracking-tighter">Nhật ký: {memberLog.name}</h2>
-              <button onClick={() => setMemberLog(null)} className="text-white font-black hover:text-rose-500"> [ĐÓNG] </button>
+        <div className="fixed inset-0 bg-slate-900/80 z-[100] flex items-center justify-center p-6">
+          <div className="bg-white border-4 border-slate-900 w-full max-w-xl shadow-[10px_10px_0px_0px_rgba(0,0,0,1)]">
+            <header className="bg-slate-900 p-4 flex justify-between items-center">
+              <h2 className="text-white font-black uppercase text-xs">Nhật ký: {memberLog.name}</h2>
+              <button onClick={() => setMemberLog(null)} className="text-white font-black hover:text-rose-500">[X]</button>
             </header>
-            <div className="p-8 max-h-[500px] overflow-y-auto">
-              {memberLog.historyLog && memberLog.historyLog.length > 0 ? (
-                <div className="space-y-4">
-                  {memberLog.historyLog.map((log, index) => (
-                    <div key={index} className="border-l-4 border-indigo-600 p-4 bg-slate-50 flex justify-between items-center">
-                      <div>
-                        <div className="text-[10px] font-black uppercase text-indigo-600">{log.activity}</div>
-                        <div className="text-xs font-bold text-slate-900 mt-1">Ghi nhận vào hệ thống</div>
-                      </div>
-                      <div className="text-[10px] font-black text-slate-400 bg-white border border-slate-200 px-3 py-1">
-                        {log.time}
-                      </div>
-                    </div>
-                  )).reverse()} 
+            <div className="p-6 max-h-[300px] overflow-y-auto space-y-2">
+              {memberLog.historyLog?.map((log, idx) => (
+                <div key={idx} className="border-l-4 border-indigo-600 p-3 bg-slate-50 flex justify-between text-[10px] font-bold">
+                  <span>{log.activity}</span>
+                  <span className="text-slate-400">{log.time}</span>
                 </div>
-              ) : (
-                <div className="text-center py-10">
-                   <p className="text-slate-400 font-bold uppercase text-xs italic">Chưa có lịch sử hoạt động nào được ghi nhận.</p>
-                </div>
-              )}
+              )).reverse() || <p className="text-center py-4 text-slate-400 uppercase text-[10px]">Trống</p>}
             </div>
-            <footer className="p-6 border-t border-slate-100 bg-slate-50 text-right">
-              <button onClick={() => setMemberLog(null)} className="px-8 py-3 bg-slate-900 text-white font-black uppercase text-[10px] tracking-widest">Xác nhận</button>
-            </footer>
           </div>
         </div>
       )}
-
       <style dangerouslySetInnerHTML={{ __html: `* { border-radius: 0px !important; }` }} />
     </div>
   );
